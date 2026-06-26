@@ -1,4 +1,5 @@
 const express = require('express');
+const { Op } = require('sequelize');
 const TelegramBot = require('node-telegram-bot-api');
 const { env } = require('./config/env');
 const { sequelize } = require('./models');
@@ -102,19 +103,53 @@ function actionKey(chatId) {
 }
 
 async function ensureFaqSeeded() {
-  const count = await FaqSection.count();
-  if (count > 0) {
-    return;
-  }
+  const seededSectionTitles = faqSeed.map((sectionData) => sectionData.section);
 
   for (const sectionData of faqSeed) {
-    const section = await FaqSection.create({ title: sectionData.section });
+    const [section] = await FaqSection.findOrCreate({
+      where: { title: sectionData.section },
+      defaults: { title: sectionData.section }
+    });
+
+    const seededQuestions = sectionData.items.map((item) => item.question);
+
     for (const item of sectionData.items) {
-      await FaqItem.create({
-        sectionId: section.id,
-        question: item.question,
-        answer: item.answer
+      const [faqItem, created] = await FaqItem.findOrCreate({
+        where: {
+          sectionId: section.id,
+          question: item.question
+        },
+        defaults: {
+          sectionId: section.id,
+          question: item.question,
+          answer: item.answer
+        }
       });
+
+      if (!created && faqItem.answer !== item.answer) {
+        faqItem.answer = item.answer;
+        await faqItem.save();
+      }
+    }
+
+    await FaqItem.destroy({
+      where: {
+        sectionId: section.id,
+        question: {
+          [Op.notIn]: seededQuestions
+        }
+      }
+    });
+  }
+
+  const sections = await FaqSection.findAll({
+    include: [{ model: FaqItem, as: 'items' }]
+  });
+
+  for (const section of sections) {
+    if (!seededSectionTitles.includes(section.title)) {
+      await FaqItem.destroy({ where: { sectionId: section.id } });
+      await section.destroy();
     }
   }
 }
