@@ -23,6 +23,16 @@ function defineUser(sequelize) {
         type: DataTypes.INTEGER,
         allowNull: false,
         defaultValue: 0
+      },
+      marketingOptIn: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false
+      },
+      newsOptIn: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false
       }
     },
     {

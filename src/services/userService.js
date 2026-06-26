@@ -31,6 +31,21 @@ async function findOrCreateUser(msg) {
   return user;
 }
 
+async function updateSubscription(telegramId, field, value) {
+  const user = await User.findOne({
+    where: { telegramId }
+  });
+
+  if (!user) {
+    return null;
+  }
+
+  user[field] = value;
+  await user.save();
+  return user;
+}
+
 module.exports = {
-  findOrCreateUser
+  findOrCreateUser,
+  updateSubscription
 };

@@ -2,8 +2,8 @@ const express = require('express');
 const TelegramBot = require('node-telegram-bot-api');
 const { env } = require('./config/env');
 const { sequelize } = require('./models');
-const { faqMenuKeyboard, mainMenu, cancelInlineKeyboard, paginatedKeyboard } = require('./utils/keyboards');
-const { findOrCreateUser } = require('./services/userService');
+const { faqMenuKeyboard, mainMenu, cancelInlineKeyboard, paginatedKeyboard, infoMenuKeyboard, mailingMenuKeyboard } = require('./utils/keyboards');
+const { findOrCreateUser, updateSubscription } = require('./services/userService');
 const { getSections, getSectionWithItems, searchFaq } = require('./services/faqService');
 const {
   createOrAppendTicket,
@@ -15,6 +15,17 @@ const {
 } = require('./services/ticketService');
 const { getSession, setMode, pushHistory, popHistory, clearHistory } = require('./services/sessionStore');
 const faqSeed = require('./data/faq.seed.json');
+const infoContent = require('./data/info.content');
+const {
+  formatTaskStatus,
+  formatInactivity,
+  formatCompetency,
+  formatSprint,
+  formatNewTask,
+  formatBroadcast,
+  resolveRecipients,
+  sendToUsers
+} = require('./services/notificationService');
 const { FaqSection, FaqItem } = require('./models');
 
 if (!env.botToken) {
@@ -26,8 +37,63 @@ const bot = new TelegramBot(env.botToken, { polling: true });
 const pendingActions = new Map();
 const PAGE_SIZE = 5;
 
+app.use(express.json());
+
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });
+});
+
+function isAuthorized(req) {
+  if (!env.internalApiToken) {
+    return true;
+  }
+
+  return req.headers['x-internal-api-token'] === env.internalApiToken;
+}
+
+function requireInternalApi(req, res, next) {
+  if (!isAuthorized(req)) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  return next();
+}
+
+async function dispatchNotification(req, res, formatter, category = null) {
+  const users = await resolveRecipients(req.body, category);
+  const text = formatter(req.body);
+  const results = await sendToUsers(bot, users, text);
+
+  return res.json({
+    delivered: results.filter((item) => item.delivered).length,
+    failed: results.filter((item) => !item.delivered).length,
+    results
+  });
+}
+
+app.post('/api/notify/task-status', requireInternalApi, async (req, res) => {
+  await dispatchNotification(req, res, formatTaskStatus);
+});
+
+app.post('/api/notify/inactivity', requireInternalApi, async (req, res) => {
+  await dispatchNotification(req, res, formatInactivity);
+});
+
+app.post('/api/notify/competency-complete', requireInternalApi, async (req, res) => {
+  await dispatchNotification(req, res, formatCompetency);
+});
+
+app.post('/api/notify/sprint', requireInternalApi, async (req, res) => {
+  await dispatchNotification(req, res, formatSprint);
+});
+
+app.post('/api/notify/new-task', requireInternalApi, async (req, res) => {
+  await dispatchNotification(req, res, formatNewTask);
+});
+
+app.post('/api/broadcast/news', requireInternalApi, async (req, res) => {
+  const category = req.body.category || 'all';
+  await dispatchNotification(req, res, formatBroadcast, category);
 });
 
 function actionKey(chatId) {
@@ -63,6 +129,38 @@ async function showFaqMenu(chatId) {
   pushHistory(chatId, { type: 'main' });
   setMode(chatId, 'faq_menu');
   return bot.sendMessage(chatId, 'Выберите режим FAQ:', faqMenuKeyboard());
+}
+
+async function showInfoMenu(chatId) {
+  clearHistory(chatId);
+  setMode(chatId, 'info_menu');
+  return bot.sendMessage(chatId, 'Выберите информационный раздел:', infoMenuKeyboard());
+}
+
+async function showInfoItem(chatId, key) {
+  const item = infoContent[key];
+
+  if (!item) {
+    return bot.sendMessage(chatId, 'Раздел не найден.');
+  }
+
+  return bot.sendMessage(chatId, `${item.title}\n\n${item.text}`, {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: 'Назад', callback_data: 'info:menu' }],
+        [{ text: 'Главное меню', callback_data: 'nav:main' }]
+      ]
+    }
+  });
+}
+
+async function showMailingMenu(chatId, user) {
+  setMode(chatId, 'mailing_menu');
+  return bot.sendMessage(
+    chatId,
+    'Здесь можно управлять подпиской на маркетинговые и новостные рассылки.',
+    mailingMenuKeyboard(user)
+  );
 }
 
 async function showSections(chatId, page = 0) {
@@ -286,6 +384,20 @@ bot.on('message', async (msg) => {
     return;
   }
 
+  if (msg.text === 'Возможности') {
+    await runButtonAction(chatId, async () => {
+      await showInfoMenu(chatId);
+    });
+    return;
+  }
+
+  if (msg.text === 'Рассылки') {
+    await runButtonAction(chatId, async () => {
+      await showMailingMenu(chatId, user);
+    });
+    return;
+  }
+
   if (msg.text === 'Обратная связь') {
     setMode(chatId, 'feedback');
     await bot.sendMessage(
@@ -398,6 +510,43 @@ bot.on('callback_query', async (query) => {
           ]
         }
       });
+    });
+    return;
+  }
+
+  if (data === 'info:menu') {
+    await runButtonAction(chatId, async () => {
+      await showInfoMenu(chatId);
+    });
+    return;
+  }
+
+  if (data.startsWith('info:')) {
+    const key = data.split(':')[1];
+    if (key && key !== 'menu') {
+      await runButtonAction(chatId, async () => {
+        await showInfoItem(chatId, key);
+      });
+      return;
+    }
+  }
+
+  if (data.startsWith('mailing:')) {
+    const [, field, value] = data.split(':');
+    const enabled = value === 'on';
+    const fieldName = field === 'marketing' ? 'marketingOptIn' : 'newsOptIn';
+    const updatedUser = await updateSubscription(query.from.id, fieldName, enabled);
+
+    await runButtonAction(chatId, async () => {
+      if (updatedUser) {
+        await bot.sendMessage(
+          chatId,
+          enabled ? 'Подписка обновлена: уведомления включены.' : 'Подписка обновлена: уведомления выключены.',
+          mailingMenuKeyboard(updatedUser)
+        );
+      } else {
+        await bot.sendMessage(chatId, 'Не удалось обновить подписку.');
+      }
     });
     return;
   }

@@ -1,5 +1,8 @@
 function mainMenu(isAdmin) {
-  const keyboard = [[{ text: 'FAQ' }, { text: 'Обратная связь' }]];
+  const keyboard = [
+    [{ text: 'Возможности' }, { text: 'FAQ' }],
+    [{ text: 'Рассылки' }, { text: 'Обратная связь' }]
+  ];
 
   if (isAdmin) {
     keyboard.push([{ text: 'Посмотреть заявки' }]);
@@ -27,6 +30,37 @@ function faqMenuKeyboard() {
       inline_keyboard: [
         [{ text: 'Поиск по ключевому слову', callback_data: 'faq:keyword' }],
         [{ text: 'Поиск по разделам', callback_data: 'faq:sections:0' }],
+        [{ text: 'Главное меню', callback_data: 'nav:main' }]
+      ]
+    }
+  };
+}
+
+function infoMenuKeyboard() {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: 'О платформе', callback_data: 'info:platform' }],
+        [{ text: 'Компетенции', callback_data: 'info:competencies' }],
+        [{ text: 'Практики', callback_data: 'info:practices' }],
+        [{ text: 'Контакты', callback_data: 'info:contacts' }],
+        [{ text: 'Спринты', callback_data: 'info:sprints' }],
+        [{ text: 'Октокоины', callback_data: 'info:octocoins' }],
+        [{ text: 'Главное меню', callback_data: 'nav:main' }]
+      ]
+    }
+  };
+}
+
+function mailingMenuKeyboard(user) {
+  const marketingLabel = user.marketingOptIn ? 'Маркетинг: включен' : 'Маркетинг: выключен';
+  const newsLabel = user.newsOptIn ? 'Новости: включены' : 'Новости: выключены';
+
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: marketingLabel, callback_data: `mailing:marketing:${user.marketingOptIn ? 'off' : 'on'}` }],
+        [{ text: newsLabel, callback_data: `mailing:news:${user.newsOptIn ? 'off' : 'on'}` }],
         [{ text: 'Главное меню', callback_data: 'nav:main' }]
       ]
     }
@@ -67,5 +101,7 @@ module.exports = {
   mainMenu,
   cancelInlineKeyboard,
   faqMenuKeyboard,
+  infoMenuKeyboard,
+  mailingMenuKeyboard,
   paginatedKeyboard
 };

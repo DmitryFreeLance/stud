@@ -47,6 +47,7 @@ module.exports = {
     },
     adminTelegramIds: readAdminIds(process.env.ADMIN_TELEGRAM_IDS),
     faqSearchLimit: readNumber(process.env.FAQ_SEARCH_LIMIT, 5),
-    actionDelayMs: readNumber(process.env.ACTION_DELAY_MS, 700)
+    actionDelayMs: readNumber(process.env.ACTION_DELAY_MS, 700),
+    internalApiToken: process.env.INTERNAL_API_TOKEN || ''
   }
 };
