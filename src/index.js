@@ -16,6 +16,7 @@ const {
 const { getSession, setMode, pushHistory, popHistory, clearHistory } = require('./services/sessionStore');
 const faqSeed = require('./data/faq.seed.json');
 const infoContent = require('./data/info.content');
+const { ensureSchema } = require('./scripts/ensureSchema');
 const {
   formatTaskStatus,
   formatInactivity,
@@ -632,6 +633,7 @@ bot.on('callback_query', async (query) => {
 async function start() {
   await sequelize.authenticate();
   await sequelize.sync();
+  await ensureSchema(sequelize);
   await ensureFaqSeeded();
   app.listen(env.port, () => {
     console.log(`HTTP server started on port ${env.port}`);
